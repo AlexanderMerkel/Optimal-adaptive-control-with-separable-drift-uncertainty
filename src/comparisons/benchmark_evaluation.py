@@ -39,10 +39,10 @@ class BenchmarkEvaluator:
         self.reinforce_params = reinforce_params
         self.reinforce_apply_fn = reinforce_apply_fn
 
-    def evaluate_all_methods(self, key, num_trajectories=100, n_steps=200, include_reinforce=False):
+    def evaluate_all_methods(self, key, num_trajectories=100, n_steps=200, include_reinforce=True):
         """Evaluate all available control methods."""
         results = {}
-        if include_reinforce and self.reinforce_params is not None:
+        if include_reinforce:
             keys = random.split(key, 3)  # CE + Neumann-Voß + REINFORCE
         else:
             keys = random.split(key, 2)  # CE + Neumann-Voß only
@@ -57,7 +57,7 @@ class BenchmarkEvaluator:
             keys[1], num_trajectories, n_steps
         )
 
-        if include_reinforce and self.reinforce_params is not None:
+        if include_reinforce:
             print("Evaluating REINFORCE control...")
             results['reinforce'] = self._evaluate_reinforce(
                 keys[2], num_trajectories, n_steps
@@ -66,17 +66,17 @@ class BenchmarkEvaluator:
         return results
 
     def _evaluate_reinforce(self, key, num_trajectories=100, n_steps=200):
-        """Evaluate REINFORCE policy (requires external policy parameters)."""
-        # This method would need to be implemented if REINFORCE evaluation is desired
-        # For now, return placeholder
-        return {
-            'method': 'REINFORCE',
-            'total_profits': np.array([]),
-            'mean_profit': 0.0,
-            'std_profit': 0.0,
-            'regime_accuracy': 0.0,
-            'note': 'REINFORCE evaluation not implemented yet'
-        }
+        """Evaluate REINFORCE policy with integrated training."""
+        from rl.reinforce.reinforce_controller_jax import REINFORCEController
+        
+        print("  Creating and training REINFORCE controller...")
+        controller = REINFORCEController(self.config)
+        
+        # Quick training for fair comparison
+        controller.train_policy(num_episodes=200, verbose=False)
+        
+        print("  Evaluating trained REINFORCE policy...")
+        return controller.evaluate_performance(key, num_trajectories, n_steps)
 
     def statistical_comparison(self, results):
         """Perform statistical comparison between methods."""
