@@ -1,23 +1,28 @@
 import os
+import sys
+import pickle
+import yaml
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-import pickle
 from jax import random
-import sys
 
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
-from rl.reinforce.reinforce_jax import (
-    PolicyNetwork,
-    reset_env,
-    rollout,
-    N,
-    T,
-)
+from rl.reinforce.reinforce_controller_jax import REINFORCEController
+
+# Load constants from model parameters
+yaml_path = Path(__file__).parent.parent / "model_parameters.yaml"
+with open(yaml_path, "r") as file:
+    params = yaml.safe_load(file)
+
+N = 200  # Time steps (standard in controller)
+T = float(params["T"])
 
 
 def load_policy(params_path):
@@ -31,8 +36,8 @@ def load_policy(params_path):
 
 def create_policy_function(hidden_dim=16):
     """Create a policy network and its apply function"""
-    policy = PolicyNetwork(hidden_dim=hidden_dim)
-    return policy
+    controller = REINFORCEController(hidden_dim=hidden_dim)
+    return controller.policy
 
 
 def plot_control_trajectories(
@@ -66,11 +71,13 @@ def plot_control_trajectories(
 
     print(f"Generating {num_paths} trajectories...")
 
-    key, reset_key, rollout_key = random.split(key, 3)
-    initial_state = reset_env(reset_key, batch_size=num_paths)
+    controller = REINFORCEController(hidden_dim=hidden_dim)
 
-    states, actions, _, _, _ = rollout(
-        rollout_key, policy_params, policy_apply, initial_state, n_steps, num_paths
+    key, reset_key, rollout_key = random.split(key, 3)
+    initial_internal, _ = controller.reset_env_with_true_regime(reset_key, batch_size=num_paths)
+
+    states, actions, _, _, final_internal, _ = controller.rollout_with_filtering(
+        rollout_key, policy_params, policy_apply, initial_internal, n_steps, num_paths
     )
 
     print("Converting to numpy arrays...")
@@ -139,17 +146,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        plot_control_trajectories(
-            args.policy_path,
-            num_paths=args.num_paths,
-            save_path=args.save_path,
-            seed=args.seed,
-            hidden_dim=args.hidden_dim,
-        )
-        print("Script completed successfully")
-    except Exception as e:
-        print(f"Error occurred: {e}")
-        import traceback
-
-        traceback.print_exc()
+    plot_control_trajectories(
+        args.policy_path,
+        num_paths=args.num_paths,
+        save_path=args.save_path,
+        seed=args.seed,
+        hidden_dim=args.hidden_dim,
+    )
+    print("Script completed successfully")

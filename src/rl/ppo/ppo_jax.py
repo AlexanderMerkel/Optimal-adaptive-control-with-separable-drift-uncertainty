@@ -9,13 +9,15 @@ import os
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
-import yaml
-from pathlib import Path
 import time
 
-yaml_path = Path(__file__).parent.parent.parent / "model_parameters.yaml"
-with open(yaml_path, "r") as file:
-    params = yaml.safe_load(file)
+# Local imports for shared utilities
+from ...utils import get_config, StateManager, PriceDynamics
+
+# Initialize shared utilities
+config = get_config()
+state_manager = StateManager(config)
+price_dynamics = PriceDynamics(config)
 
 
 LOG_STD_MIN = -5.0
@@ -25,7 +27,6 @@ MAX_GRAD_NORM = 1.0
 
 
 BATCH_SIZE = 256
-N = 200
 
 
 PPO_EPOCHS = 4
@@ -35,22 +36,6 @@ VF_COEFF = 0.5
 ENT_COEFF = 0.01
 GAMMA = 1.0
 
-
-T = float(params["T"])
-dt = T / N
-RHO = float(params["RHO"])
-SIGMA = float(params["SIGMA"])
-C_RUNNING = float(params["C_RUNNING"])
-C_TERMINAL = float(params["C_TERMINAL"])
-LAMBDA_L = float(params["LAMBDA_L"])
-LAMBDA_H = float(params["LAMBDA_H"])
-KAPPA_L = float(params["KAPPA_L"])
-KAPPA_H = float(params["KAPPA_H"])
-STATE_BOUNDS = params["STATE_BOUNDS"]
-INITIAL_STATE = params["INITIAL_STATE"]
-
-low_bounds = jnp.array([v[0] for v in STATE_BOUNDS.values()], dtype=jnp.float32)
-high_bounds = jnp.array([v[1] for v in STATE_BOUNDS.values()], dtype=jnp.float32)
 
 
 class ActorNetwork(nn.Module):
@@ -82,11 +67,8 @@ class CriticNetwork(nn.Module):
 
 @partial(jax.jit, static_argnames=["batch_size"])
 def reset_env(key: random.PRNGKey, batch_size: int = BATCH_SIZE):
-    initial_values = jnp.array(
-        [INITIAL_STATE[k] for k in ["t", "S", "X", "p", "A_l", "A_h"]], dtype=jnp.float32
-    )
-    state = jnp.tile(initial_values, (batch_size, 1))
-    return state
+    _, observable_state = state_manager.initialize_batch(batch_size, key)
+    return observable_state
 
 
 @partial(jax.jit, static_argnames=["batch_size"])
@@ -95,44 +77,41 @@ def step_env(
 ):
     key, subkey = random.split(key)
 
-    dW_batch = SIGMA * jnp.sqrt(dt) * random.normal(subkey, (batch_size,), dtype=jnp.float32)
+    dW_batch = config.SIGMA * jnp.sqrt(config.dt) * random.normal(subkey, (batch_size,), dtype=jnp.float32)
 
     t, S, X, p, A_l, A_h = state.T
     actions = actions.reshape(batch_size)
 
-    impact_diff = LAMBDA_L * (actions + KAPPA_L * A_l) - LAMBDA_H * (actions + KAPPA_H * A_h)
+    # Regime impact difference for belief update
+    impact_diff = config.LAMBDA_L * (actions + config.KAPPA_L * A_l) - config.LAMBDA_H * (actions + config.KAPPA_H * A_h)
 
+    # Expected drift based on current belief
     driftS = -(
-        LAMBDA_L * (actions + KAPPA_L * A_l) * p + LAMBDA_H * (actions + KAPPA_H * A_h) * (1.0 - p)
+        config.LAMBDA_L * (actions + config.KAPPA_L * A_l) * p +
+        config.LAMBDA_H * (actions + config.KAPPA_H * A_h) * (1.0 - p)
     )
 
-    dS = driftS * dt + dW_batch
+    # State updates
+    dS = driftS * config.dt + dW_batch
+    dX = -actions * config.dt
+    dp_hjb = -p * (1.0 - p) * impact_diff * dW_batch  # PPO-specific simplified belief update
+    dA_l = (actions + config.KAPPA_L * A_l) * config.dt
+    dA_h = (actions + config.KAPPA_H * A_h) * config.dt
 
-    dX = -actions * dt
-
-    dp_hjb = -p * (1.0 - p) * impact_diff * dW_batch
-
-    dA_l = (actions + KAPPA_L * A_l) * dt
-    dA_h = (actions + KAPPA_H * A_h) * dt
-
-    t_next = t + dt
+    t_next = t + config.dt
     S_next = S + dS
     X_next = X + dX
-
     p_next = p + dp_hjb
     A_l_next = A_l + dA_l
     A_h_next = A_h + dA_h
 
     next_state_unclamped = jnp.stack([t_next, S_next, X_next, p_next, A_l_next, A_h_next], axis=1)
-    next_state = jnp.clip(next_state_unclamped, low_bounds, high_bounds)
+    next_state = jnp.clip(next_state_unclamped, config.low_bounds, config.high_bounds)
 
     S_next_batch, X_next_batch = next_state[:, 1], next_state[:, 2]
-    instant_profit = ((S_next_batch - RHO * actions) * actions - C_RUNNING * (X_next_batch**2)) * dt
-
-    reward = instant_profit
+    reward = price_dynamics.compute_reward(S_next_batch, X_next_batch, actions)
 
     done = jnp.zeros(batch_size, dtype=bool)
-
     return next_state, reward, done
 
 
@@ -144,7 +123,7 @@ def ppo_rollout(
     actor_apply: callable,
     critic_apply: callable,
     initial_state: jnp.ndarray,
-    n_steps: int = N,
+    n_steps: int = config.N,
     batch_size: int = BATCH_SIZE,
 ):
     def scan_body(carry, _):
@@ -181,7 +160,7 @@ def ppo_rollout(
 
     S_final, X_final = final_state[:, 1], final_state[:, 2]
 
-    terminal_profit = S_final * X_final - C_TERMINAL * X_final**2
+    terminal_profit = price_dynamics.compute_terminal_reward(S_final, X_final)
 
     rewards = rewards.at[-1, :].add(terminal_profit)
 
@@ -238,7 +217,7 @@ def ppo_train_step(
     actor_optimizer_update: callable,
     critic_optimizer_update: callable,
     num_minibatches: int,
-    n_steps: int = N,
+    n_steps: int = config.N,
     batch_size: int = BATCH_SIZE,
 ):
     key, rollout_key, reset_key = random.split(key, 3)
@@ -387,7 +366,7 @@ def ppo_train_step(
 def train_policy_ppo_jax(
     num_updates=1000, batch_size=BATCH_SIZE, actor_lr=3e-4, critic_lr=1e-3, seed=42
 ):
-    n_steps = N  # Add this line to fix the undefined variable error
+    n_steps = config.N  # Add this line to fix the undefined variable error
     key = random.PRNGKey(seed)
     actor = ActorNetwork()
     critic = CriticNetwork()
@@ -420,7 +399,7 @@ def train_policy_ppo_jax(
         actor_optimizer_update=actor_optimizer_update_fn,
         critic_optimizer_update=critic_optimizer_update_fn,
         num_minibatches=num_minibatches,
-        n_steps=N,
+        n_steps=config.N,
         batch_size=batch_size,
     )
 
@@ -474,7 +453,7 @@ def simulate_actor_policy(
     actor_params: dict,
     actor_apply: callable,
     initial_state: jnp.ndarray,
-    n_steps: int = N,
+    n_steps: int = config.N,
     batch_size: int = 1,
 ):
     """Simplified rollout just for simulation using only the actor."""
@@ -503,7 +482,7 @@ def simulate_actor_policy(
     return states, actions, rewards, final_state
 
 
-def simulate_and_plot_ppo(key, actor_params, actor_apply, num_paths=10, n_steps=N, save_path=None):
+def simulate_and_plot_ppo(key, actor_params, actor_apply, num_paths=10, n_steps=config.N, save_path=None):
     key, reset_key, sim_key = random.split(key, 3)
     initial_state_batch = reset_env(reset_key, batch_size=num_paths)
 
@@ -513,7 +492,7 @@ def simulate_and_plot_ppo(key, actor_params, actor_apply, num_paths=10, n_steps=
 
     actions_np = np.array(actions)
     states_np = np.array(states)
-    time_steps = np.linspace(0, T, n_steps)
+    time_steps = np.linspace(0, config.T, n_steps)
 
     plt.figure(figsize=(10, 6))
     for i in range(num_paths):

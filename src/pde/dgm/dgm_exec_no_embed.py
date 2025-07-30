@@ -39,18 +39,18 @@ class DGMNet(nn.Module):
         self.Wr = nn.ModuleList([nn.Linear(hidden_size, hidden_size) for _ in range(L)])
         self.Uh = nn.ModuleList([nn.Linear(input_size, hidden_size) for _ in range(L)])
         self.Wh = nn.ModuleList([nn.Linear(hidden_size, hidden_size) for _ in range(L)])
-        
+
         self.output = nn.Linear(hidden_size, output_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         S = self.sigmoid(self.W1(x))
-        for l in range(self.L):
-            Z = self.sigmoid(self.Uz[l](x) + self.Wz[l](S))
-            G = self.sigmoid(self.Ug[l](x) + self.Wg(S))
-            R = self.sigmoid(self.Ur[l](x) + self.Wr[l](S))
-            H = self.sigmoid(self.Uh[l](x) + self.Wh[l](S * R))
+        for layer_idx in range(self.L):
+            Z = self.sigmoid(self.Uz[layer_idx](x) + self.Wz[layer_idx](S))
+            G = self.sigmoid(self.Ug[layer_idx](x) + self.Wg(S))
+            R = self.sigmoid(self.Ur[layer_idx](x) + self.Wr[layer_idx](S))
+            H = self.sigmoid(self.Uh[layer_idx](x) + self.Wh[layer_idx](S * R))
             S = (1 - G) * H + Z * S
-        
+
         out = self.output(S)
         return out
 
@@ -59,7 +59,7 @@ def pde_residual(z: torch.Tensor,
                     policy_net: DGMNet) -> torch.Tensor:
     """
     Computes the PDE residual of the given HJB equation:
-    
+
     0 = V_t
         + 1 / [4( rho - p^2(1-p)^2 (lambda_l - lambda_h)^2 V_pp )]
           * [ ( (lambda_l p + lambda_h (1-p)) V_s
@@ -125,8 +125,8 @@ def pde_residual(z: torch.Tensor,
     # --------------------------
     # 3) Define constants/params used in PDE
     # --------------------------
-    sigma: float = 1.0 
-    rho: float = 1 
+    sigma: float = 1.0
+    rho: float = 1
     lambda_l: float = 0.5
     lambda_h: float =  0.1
     kappa_l: float = 0.005
