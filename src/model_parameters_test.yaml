@@ -23,19 +23,19 @@ Y_0: 100.0                # Initial asset price
 X_0: 10.0                 # Initial inventory (shares to liquidate)
 P_0: 0.5                  # Initial belief (50% probability each regime)
 
-# REINFORCE Training Configuration
+# REINFORCE Training Configuration (TEST VALUES)
 REINFORCE:
-  n_episodes: 1000        # Training episodes
-  hidden_dim: 128         # Neural network hidden units
+  n_episodes: 10          # Training episodes (SMALL FOR TESTING)
+  hidden_dim: 32          # Neural network hidden units (SMALL)
   learning_rate: 0.001    # Adam optimizer learning rate
-  batch_size: 64          # Batch size for policy updates
-  log_interval: 100       # Progress reporting frequency
-  eval_interval: 1000     # Evaluation frequency
-  eval_episodes: 100      # Episodes for evaluation
+  batch_size: 8           # Batch size for policy updates (SMALL)
+  log_interval: 5         # Progress reporting frequency (FREQUENT)
+  eval_interval: 10       # Evaluation frequency (NEVER TRIGGERED)
+  eval_episodes: 5        # Episodes for evaluation (SMALL)
 
-# Comparison Configuration
+# Comparison Configuration (TEST VALUES)
 COMPARISON:
-  n_evaluation_episodes: 100  # Episodes for final performance evaluation
+  n_evaluation_episodes: 5   # Episodes for final performance evaluation (SMALL)
 
 STATE_BOUNDS:
   t: [0.0, 1.0]

@@ -1,123 +1,109 @@
 """
-Control Theory Framework
+Minimal Control Theory Framework for Optimal Execution
 
-A general-purpose framework for stochastic optimal control problems, built on the 
-foundation of the optimal execution system. This package provides abstractions for:
+A focused implementation for optimal execution with regime uncertainty,
+based on "Optimal adaptive control with separable drift uncertainty".
 
-- Control policies (deterministic, stochastic, neural)
-- State transition systems and environments  
-- Value function solvers (Riccati, HJB, neural)
-- Trajectory generation and analysis
-- Performance evaluation and metrics
-
-The framework is designed for extensibility while maintaining mathematical rigor
-and computational efficiency through JAX integration.
-
-Core Components:
-    - State, Action: Immutable data structures for control problems
-    - ControlPolicy: Abstract interface for control computation
-    - StateTransitionSystem: Abstract interface for dynamics
-    - ControlEnvironment: Complete environment abstraction
-    - ValueFunctionSolver: Abstract interface for value function computation
+Main Components:
+- OptimalExecutionConfig: Problem configuration
+- OptimalExecutionEnv: Environment with regime dynamics  
+- Policies: REINFORCE, CertaintyEquivalent, Oracle policies
+- PaperMethodsComparator: Three-method comparison tool
 
 Usage:
-    from control_theory import ControlPolicy, RiccatiPolicy
-    from control_theory import ControlEnvironment, OptimalExecutionEnvironment
-    from control_theory import TrajectoryGenerator, ControlSystemFactory
+    from control_theory import (
+        OptimalExecutionConfig, 
+        PaperMethodsComparator,
+        REINFORCEConfig
+    )
+    
+    # Setup
+    config = OptimalExecutionConfig()
+    reinforce_config = REINFORCEConfig(n_episodes=1000)
+    
+    # Comparison
+    comparator = PaperMethodsComparator(config, reinforce_config)
+    results = comparator.compare_all_methods(key=random.PRNGKey(42))
 """
 
-from .core import (
-    State,
-    Action, 
-    Reward,
-    Info,
-    ControlPolicy,
-    StateTransitionSystem,
-    RewardFunction
-)
+# Configuration
+from .config import OptimalExecutionConfig, default_config
 
+# Environment
+from .environment import OptimalExecutionEnv, StepResult
+
+# Policies
 from .policies import (
-    RiccatiPolicy,
-    NeuralPolicy,
-    NetworkArchitectureRegistry
+    Policy,
+    CertaintyEquivalentPolicy,
+    NaivePolicy, 
+    OraclePolicy,
+    RLPolicy,
+    SimpleGaussianPolicy,
+    SimpleDeterministicPolicy,
+    create_gaussian_rl_policy,
+    create_deterministic_rl_policy
 )
 
-from .value_functions import (
-    ValueFunctionSolver,
-    ValueFunction,
-    GeneralRiccatiSolver
+# HJB Optimal Control (available but not used in comparison)
+# from .hjb_solver import (
+#     HJBConfig,
+#     HJBOptimalPolicy,
+#     HJBSolver,
+#     ValueNetwork,
+#     train_hjb_optimal_control
+# )
+
+# REINFORCE Agent
+from .reinforce_agent import (
+    REINFORCEConfig,
+    REINFORCEPolicy,
+    REINFORCEAgent,
+    PolicyNetwork,
+    train_reinforce_policy
 )
 
-from .environments import (
-    ControlEnvironment,
-    OptimalExecutionEnvironment,
-    StateSpace,
-    NoiseModel,
-    BrownianMotion
-)
+# Comparison utilities
+from .comparison import PolicyComparator, PolicyResult, PaperMethodsComparator
 
-from .trajectory import (
-    Trajectory,
-    BatchTrajectories,
-    TrajectoryGenerator,
-    TrajectoryAnalyzer,
-    generate_trajectory_from_policy,
-    generate_batch_trajectories_from_policy
-)
-
-from .factory import (
-    ControlSystemFactory,
-    ControlSystemConfig,
-    ControlSystem,
-    get_factory,
-    create_neumann_voss_system,
-    create_ce_system,
-    create_neural_system
-)
-
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
-    # Core types and interfaces
-    "State",
-    "Action", 
-    "Reward",
-    "Info",
-    "ControlPolicy",
-    "StateTransitionSystem", 
-    "RewardFunction",
+    # Configuration
+    "OptimalExecutionConfig",
+    "default_config",
     
-    # Policy implementations
-    "RiccatiPolicy",
-    "NeuralPolicy",
-    "NetworkArchitectureRegistry",
+    # Environment
+    "OptimalExecutionEnv", 
+    "StepResult",
     
-    # Value function solvers
-    "ValueFunctionSolver",
-    "ValueFunction",
-    "GeneralRiccatiSolver",
+    # Policies
+    "Policy",
+    "CertaintyEquivalentPolicy",
+    "NaivePolicy",
+    "OraclePolicy", 
+    "RLPolicy",
+    "SimpleGaussianPolicy",
+    "SimpleDeterministicPolicy",
+    "create_gaussian_rl_policy",
+    "create_deterministic_rl_policy",
     
-    # Environment and dynamics
-    "ControlEnvironment",
-    "OptimalExecutionEnvironment", 
-    "StateSpace",
-    "NoiseModel",
-    "BrownianMotion",
+    # HJB Optimal Control (commented out)
+    # "HJBConfig",
+    # "HJBOptimalPolicy", 
+    # "HJBSolver",
+    # "ValueNetwork",
+    # "train_hjb_optimal_control",
     
-    # Trajectory generation and analysis
-    "Trajectory",
-    "BatchTrajectories",
-    "TrajectoryGenerator",
-    "TrajectoryAnalyzer",
-    "generate_trajectory_from_policy",
-    "generate_batch_trajectories_from_policy",
+    # REINFORCE Agent
+    "REINFORCEConfig",
+    "REINFORCEPolicy",
+    "REINFORCEAgent", 
+    "PolicyNetwork",
+    "train_reinforce_policy",
     
-    # Control system factory and utilities
-    "ControlSystemFactory",
-    "ControlSystemConfig", 
-    "ControlSystem",
-    "get_factory",
-    "create_neumann_voss_system",
-    "create_ce_system",
-    "create_neural_system",
+    # Comparison
+    "PolicyComparator",
+    "PolicyResult",
+    "PaperMethodsComparator",
 ]

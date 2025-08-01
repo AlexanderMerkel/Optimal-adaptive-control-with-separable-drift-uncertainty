@@ -1,361 +1,326 @@
 """
-Control Policy Implementations
+Control Policies for Optimal Execution with Regime Uncertainty
 
-This module provides concrete implementations of the ControlPolicy interface
-for different types of control strategies commonly used in stochastic control.
-
-Policy Types:
-    - RiccatiPolicy: LQR-based policies using Riccati equation solutions
-    - NeuralPolicy: Neural network-based policies for reinforcement learning
-    - NetworkArchitectureRegistry: Centralized management of network architectures
+Implements different control strategies for comparison:
+1. CertaintyEquivalentPolicy: Uses expected parameters E[λ], E[κ]
+2. NaivePolicy: Simple linear liquidation
+3. OraclePolicy: Knows true regime (upper bound)  
+4. RLPolicy: Interface for reinforcement learning policies
 """
 
-from typing import Optional, Dict, Any, Callable, Union
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
 from jax import random
+from abc import ABC, abstractmethod
+from typing import Callable, Optional, Dict, Any
+import flax.linen as nn
 
-from .core import State, Action, ControlPolicy, create_action
-from ..utils import RiccatiSolver, Config
+from .config import OptimalExecutionConfig, default_config
 
 
-class RiccatiPolicy(ControlPolicy):
+class Policy(ABC):
+    """Base class for control policies."""
+    
+    @abstractmethod
+    def __call__(self, state: jnp.ndarray, time: float) -> float:
+        """
+        Compute control action for given state and time.
+        
+        Args:
+            state: Current state [Y, X, p, alpha_l, alpha_h]
+            time: Current time
+            
+        Returns:
+            Control action (trading rate)
+        """
+        pass
+    
+    @property
+    def name(self) -> str:
+        """Policy name for logging/plotting."""
+        return self.__class__.__name__
+
+
+class CertaintyEquivalentPolicy(Policy):
     """
-    Control policy based on Riccati equation solutions for LQR problems.
+    Certainty Equivalent control policy.
     
-    Implements optimal linear feedback control: u(t) = -K(t) * x(t)
-    where K(t) is the solution to the differential Riccati equation.
+    Uses expected regime parameters based on current belief:
+    E[λ] = p * λ_l + (1-p) * λ_h
+    E[κ] = p * κ_l + (1-p) * κ_h
     
-    This policy is suitable for:
-    - Linear-quadratic control problems
-    - Certainty equivalent control
-    - Mean-field control with averaged parameters
-    - Robust control with worst-case parameters
+    Then applies deterministic control as if these were the true parameters.
+    """
+    
+    def __init__(self, config: OptimalExecutionConfig = default_config):
+        """Initialize CE policy with configuration."""
+        self.config = config
+        
+        # JIT compile for performance
+        self._compute_action = jax.jit(self._compute_action_impl)
+    
+    def __call__(self, state: jnp.ndarray, time: float) -> float:
+        """Compute CE control action."""
+        return self._compute_action(state, time)
+    
+    def _compute_action_impl(self, state: jnp.ndarray, time: float) -> float:
+        """JIT-compiled CE action computation."""
+        Y, X, p, alpha_l, alpha_h = state
+        
+        # Expected parameters based on belief
+        lambda_l, kappa_l, lambda_h, kappa_h = self.config.regime_params
+        expected_lambda = p * lambda_l + (1 - p) * lambda_h
+        expected_kappa = p * kappa_l + (1 - p) * kappa_h  
+        expected_alpha = p * alpha_l + (1 - p) * alpha_h
+        
+        # Remaining time
+        remaining_time = self.config.T - time
+        remaining_time = jnp.maximum(remaining_time, 1e-6)  # Avoid division by zero
+        
+        # Simple CE heuristic: liquidate inventory over remaining time
+        # with adjustment for expected impact
+        base_rate = X / remaining_time
+        
+        # Adjust for price impact (reduce rate if high impact expected)
+        impact_adjustment = 1.0 / (1.0 + expected_lambda * expected_alpha / self.config.rho)
+        
+        action = base_rate * impact_adjustment
+        
+        # Ensure action doesn't exceed inventory
+        action = jnp.minimum(action, X / self.config.dt)
+        action = jnp.maximum(action, 0.0)  # No buying
+        
+        return action
+    
+    @property 
+    def name(self) -> str:
+        return "Certainty Equivalent"
+
+
+class NaivePolicy(Policy):
+    """
+    Naive linear liquidation policy.
+    
+    Simply liquidates inventory linearly over time, ignoring regime uncertainty
+    and price impact effects.
+    """
+    
+    def __init__(self, config: OptimalExecutionConfig = default_config):
+        """Initialize naive policy."""
+        self.config = config
+    
+    def __call__(self, state: jnp.ndarray, time: float) -> float:
+        """Compute naive linear liquidation action."""
+        Y, X, p, alpha_l, alpha_h = state
+        
+        # Remaining time
+        remaining_time = self.config.T - time
+        remaining_time = jnp.maximum(remaining_time, 1e-6)
+        
+        # Linear liquidation rate
+        action = X / remaining_time
+        
+        # Ensure non-negative and feasible
+        action = jnp.maximum(action, 0.0)
+        action = jnp.minimum(action, X / self.config.dt)
+        
+        return action
+    
+    @property
+    def name(self) -> str:
+        return "Naive Linear"
+
+
+class OraclePolicy(Policy):
+    """
+    Oracle policy that knows the true regime.
+    
+    This provides an upper bound on performance since it has perfect information
+    about the hidden regime state.
+    """
+    
+    def __init__(self, config: OptimalExecutionConfig = default_config):
+        """Initialize oracle policy."""
+        self.config = config
+        self.true_regime = None  # Set by environment
+        
+        # JIT compile
+        self._compute_action = jax.jit(self._compute_action_impl)
+    
+    def set_true_regime(self, regime: float):
+        """Set the true regime (called by environment)."""
+        self.true_regime = regime
+    
+    def __call__(self, state: jnp.ndarray, time: float) -> float:
+        """Compute oracle control action."""
+        if self.true_regime is None:
+            # Fallback to CE if regime not set
+            return CertaintyEquivalentPolicy(self.config)(state, time)
+        
+        return self._compute_action(state, time, self.true_regime)
+    
+    def _compute_action_impl(self, state: jnp.ndarray, time: float, true_regime: float) -> float:
+        """JIT-compiled oracle action computation."""
+        Y, X, p, alpha_l, alpha_h = state
+        
+        # True parameters
+        lambda_l, kappa_l, lambda_h, kappa_h = self.config.regime_params
+        true_lambda = (1 - true_regime) * lambda_l + true_regime * lambda_h
+        true_kappa = (1 - true_regime) * kappa_l + true_regime * kappa_h
+        true_alpha = (1 - true_regime) * alpha_l + true_regime * alpha_h
+        
+        # Remaining time
+        remaining_time = self.config.T - time
+        remaining_time = jnp.maximum(remaining_time, 1e-6)
+        
+        # Optimal liquidation with known parameters
+        base_rate = X / remaining_time
+        
+        # Adjust for true impact
+        impact_adjustment = 1.0 / (1.0 + true_lambda * true_alpha / self.config.rho)
+        
+        action = base_rate * impact_adjustment
+        
+        # Constraints
+        action = jnp.minimum(action, X / self.config.dt)
+        action = jnp.maximum(action, 0.0)
+        
+        return action
+    
+    @property
+    def name(self) -> str:
+        return "Oracle"
+
+
+class RLPolicy(Policy):
+    """
+    Reinforcement Learning policy interface.
+    
+    Can be used with different RL algorithms (REINFORCE, PPO, etc.).
+    Uses a neural network to map states to actions.
     """
     
     def __init__(self, 
-                 riccati_solver: RiccatiSolver,
-                 lambda_func: Union[float, Callable[[State, float], float]],
-                 rho: float,
-                 state_indices: Optional[Dict[str, int]] = None):
-        """
-        Initialize Riccati-based policy.
-        
-        Args:
-            riccati_solver: Solver for Riccati equations
-            lambda_func: Lambda parameter (float) or function of state/time
-            rho: Temporary impact parameter 
-            state_indices: Mapping of state variable names to indices
-        """
-        self.riccati_solver = riccati_solver
-        self.lambda_func = lambda_func
-        self.rho = rho
-        self.state_indices = state_indices or {'X': 2}  # Default inventory index
-        
-        # Pre-solve Riccati equation if lambda is constant
-        if isinstance(lambda_func, (int, float)):
-            self.K_trajectory = riccati_solver.solve(float(lambda_func))
-            self._constant_lambda = True
-        else:
-            self._constant_lambda = False
-            # For variable lambda, we'll solve on-demand or use grid interpolation
-            self._setup_lambda_grid()
-    
-    def _setup_lambda_grid(self):
-        """Setup grid-based interpolation for variable lambda functions."""
-        # Create reasonable lambda range for interpolation
-        lambda_min, lambda_max = 0.1, 3.0  # Reasonable range for most problems
-        self.lambda_grid = jnp.linspace(lambda_min, lambda_max, 101)
-        self.K_solutions = self.riccati_solver.solve_grid(self.lambda_grid)
-    
-    def compute_action(self, state: State, time: Optional[float] = None, 
-                      key: Optional[random.PRNGKey] = None) -> Action:
-        """
-        Compute optimal linear feedback control action.
-        
-        Args:
-            state: Current state
-            time: Current time (for time step indexing)
-            key: Unused (deterministic policy)
-            
-        Returns:
-            Optimal control action
-        """
-        # Extract inventory position (or relevant state variable)
-        if isinstance(self.state_indices['X'], int):
-            X = state.data[self.state_indices['X']]
-        else:
-            # Handle batch case
-            X = state.data[:, self.state_indices['X']]
-        
-        # Get Riccati gain K(t)
-        if self._constant_lambda:
-            # Use pre-computed trajectory
-            if time is not None:
-                # Convert time to index using JAX-compatible operations
-                time_idx = jnp.floor(time * len(self.K_trajectory) / self.riccati_solver.config.T).astype(int)
-                time_idx = jnp.clip(time_idx, 0, len(self.K_trajectory) - 1)
-            else:
-                time_idx = 0
-            K_current = self.K_trajectory[time_idx]
-        else:
-            # Variable lambda case - evaluate lambda function
-            lambda_val = self.lambda_func(state, time or 0.0)
-            if time is not None:
-                time_idx = jnp.floor(time * len(self.K_solutions) / self.riccati_solver.config.T).astype(int)
-                time_idx = jnp.clip(time_idx, 0, len(self.K_solutions) - 1)
-            else:
-                time_idx = 0
-            K_current = self.riccati_solver.interpolate_solution(
-                self.K_solutions, self.lambda_grid, lambda_val, time_idx
-            )
-        
-        # Compute optimal action: u = -(lambda / rho) * K(t) * X(t)
-        if self._constant_lambda:
-            lambda_val = self.lambda_func if isinstance(self.lambda_func, (int, float)) else 1.0
-        else:
-            lambda_val = self.lambda_func(state, time or 0.0)
-            
-        action_value = -(lambda_val / self.rho) * K_current * X
-        
-        return create_action(
-            data=jnp.atleast_1d(action_value),
-            policy_type="riccati",
-            lambda_value=lambda_val,
-            riccati_gain=K_current
-        )
-    
-    @property
-    def is_stochastic(self) -> bool:
-        """Riccati policies are deterministic."""
-        return False
-        
-    @property 
-    def is_time_varying(self) -> bool:
-        """Riccati policies are typically time-varying in finite horizon."""
-        return True
-
-
-class NeuralPolicy(ControlPolicy):
-    """
-    Neural network-based control policy for reinforcement learning.
-    
-    Supports both deterministic and stochastic policies through different
-    network architectures and output processing.
-    """
-    
-    def __init__(self,
                  network: nn.Module,
                  params: Dict[str, Any],
-                 policy_type: str = "gaussian",
-                 action_bounds: Optional[tuple] = None):
+                 config: OptimalExecutionConfig = default_config,
+                 policy_type: str = "gaussian"):
         """
-        Initialize neural network policy.
+        Initialize RL policy.
         
         Args:
-            network: Flax neural network module
+            network: Neural network (Flax module)
             params: Network parameters
-            policy_type: Type of policy ("gaussian", "deterministic", "discrete")
-            action_bounds: Optional bounds for action clipping
+            config: Problem configuration
+            policy_type: "gaussian" or "deterministic"
         """
         self.network = network
         self.params = params
+        self.config = config
         self.policy_type = policy_type
-        self.action_bounds = action_bounds
         
-    def compute_action(self, state: State, time: Optional[float] = None,
-                      key: Optional[random.PRNGKey] = None) -> Action:
-        """
-        Compute action using neural network.
+        # JIT compile network forward pass
+        self._forward = jax.jit(self.network.apply)
+    
+    def __call__(self, state: jnp.ndarray, time: float, key: Optional[random.PRNGKey] = None) -> float:
+        """Compute RL policy action."""
+        # Add time to state if network expects it
+        network_input = jnp.concatenate([state, jnp.array([time])])
         
-        Args:
-            state: Current state
-            time: Current time (may be unused)
-            key: Random key for stochastic policies
-            
-        Returns:
-            Neural network action
-        """
-        # Forward pass through network
         if self.policy_type == "gaussian":
-            mean, log_std = self.network.apply({"params": self.params}, state.data)
+            mean, log_std = self._forward({"params": self.params}, network_input)
             mean, log_std = mean.squeeze(), log_std.squeeze()
             
             if key is not None:
-                # Sample from Gaussian distribution
+                # Sample from policy
                 std = jnp.exp(log_std)
-                action_raw = mean + std * random.normal(key, mean.shape)
+                action = mean + std * random.normal(key)
             else:
                 # Use mean for deterministic evaluation
-                action_raw = mean
-                
-            # Apply tanh squashing if bounds are specified
-            if self.action_bounds is not None:
-                action_value = jnp.tanh(action_raw) * self.action_bounds[1]
-            else:
-                action_value = action_raw
-                
-            return create_action(
-                data=jnp.atleast_1d(action_value),
-                policy_type="neural_gaussian",
-                mean=mean,
-                log_std=log_std,
-                raw_action=action_raw
-            )
-            
+                action = mean
+        
         elif self.policy_type == "deterministic":
-            action_raw = self.network.apply({"params": self.params}, state.data)
-            
-            # Apply bounds if specified
-            if self.action_bounds is not None:
-                action_value = jnp.tanh(action_raw) * self.action_bounds[1]
-            else:
-                action_value = action_raw
-                
-            return create_action(
-                data=jnp.atleast_1d(action_value),
-                policy_type="neural_deterministic"
-            )
-            
+            action = self._forward({"params": self.params}, network_input).squeeze()
+        
         else:
-            raise ValueError(f"Unsupported policy type: {self.policy_type}")
+            raise ValueError(f"Unknown policy type: {self.policy_type}")
+        
+        # Apply constraints (non-negative, inventory bound)
+        Y, X, p, alpha_l, alpha_h = state
+        action = jnp.maximum(action, 0.0)
+        action = jnp.minimum(action, X / self.config.dt)
+        
+        return action
     
     @property
-    def is_stochastic(self) -> bool:
-        """Neural policies can be stochastic depending on type."""
-        return self.policy_type in ["gaussian", "discrete"]
-        
-    @property
-    def is_time_varying(self) -> bool:
-        """Neural policies can be time-varying if time is an input."""
-        return False  # Default assumption, can be overridden
+    def name(self) -> str:
+        return f"RL-{self.policy_type.capitalize()}"
 
 
-class NetworkArchitectureRegistry:
-    """
-    Centralized registry for neural network architectures.
-    
-    Provides a clean interface for creating and managing different network
-    architectures used across the control theory framework.
-    """
-    
-    _architectures = {}
-    
-    @classmethod
-    def register(cls, name: str, network_class: type, default_config: Dict[str, Any]):
-        """
-        Register a network architecture.
-        
-        Args:
-            name: Architecture name
-            network_class: Network class (Flax module)
-            default_config: Default configuration parameters
-        """
-        cls._architectures[name] = {
-            'class': network_class,
-            'default_config': default_config
-        }
-    
-    @classmethod
-    def create_network(cls, name: str, config: Optional[Dict[str, Any]] = None) -> nn.Module:
-        """
-        Create network instance from registry.
-        
-        Args:
-            name: Registered architecture name
-            config: Override configuration parameters
-            
-        Returns:
-            Network instance
-        """
-        if name not in cls._architectures:
-            raise ValueError(f"Unknown architecture: {name}")
-            
-        arch_info = cls._architectures[name]
-        network_config = arch_info['default_config'].copy()
-        if config:
-            network_config.update(config)
-            
-        return arch_info['class'](**network_config)
-    
-    @classmethod
-    def list_architectures(cls) -> list:
-        """List all registered architectures."""
-        return list(cls._architectures.keys())
-
-
-# Standard network architectures
-class GaussianPolicyNetwork(nn.Module):
-    """Standard Gaussian policy network for continuous control."""
+# Simple neural network architectures for RL policies
+class SimpleGaussianPolicy(nn.Module):
+    """Simple feedforward network for Gaussian policies."""
     
     hidden_dim: int = 64
-    action_dim: int = 1
     log_std_min: float = -5.0
     log_std_max: float = 2.0
     
     @nn.compact
     def __call__(self, x):
+        # Two hidden layers
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.tanh(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.tanh(x)
         
-        mean = nn.Dense(self.action_dim)(x)
-        log_std = nn.Dense(self.action_dim)(x)
+        # Output mean and log_std
+        mean = nn.Dense(1)(x)
+        log_std = nn.Dense(1)(x)
         log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
         
         return mean, log_std
 
 
-class DeterministicPolicyNetwork(nn.Module):
-    """Deterministic policy network for continuous control."""
+class SimpleDeterministicPolicy(nn.Module):
+    """Simple feedforward network for deterministic policies."""
     
     hidden_dim: int = 64
-    action_dim: int = 1
     
     @nn.compact
     def __call__(self, x):
+        # Two hidden layers  
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.tanh(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.tanh(x)
         
-        action = nn.Dense(self.action_dim)(x)
+        # Single action output
+        action = nn.Dense(1)(x)
         return action
 
 
-class ValueNetwork(nn.Module):
-    """Value function network for critic-based methods."""
+# Utility functions for creating RL policies
+def create_gaussian_rl_policy(config: OptimalExecutionConfig = default_config,
+                            hidden_dim: int = 64,
+                            key: random.PRNGKey = random.PRNGKey(42)) -> RLPolicy:
+    """Create RL policy with Gaussian action distribution."""
+    network = SimpleGaussianPolicy(hidden_dim=hidden_dim)
     
-    hidden_dim: int = 64
+    # Initialize parameters
+    dummy_input = jnp.ones(6)  # State dim (5) + time (1)
+    params = network.init(key, dummy_input)
     
-    @nn.compact
-    def __call__(self, x):
-        x = nn.Dense(self.hidden_dim)(x)
-        x = nn.tanh(x)
-        x = nn.Dense(self.hidden_dim)(x)
-        x = nn.tanh(x)
-        
-        value = nn.Dense(1)(x)
-        return value
+    return RLPolicy(network, params, config, "gaussian")
 
 
-# Register standard architectures
-NetworkArchitectureRegistry.register(
-    "gaussian_policy",
-    GaussianPolicyNetwork,
-    {"hidden_dim": 64, "action_dim": 1}
-)
-
-NetworkArchitectureRegistry.register(
-    "deterministic_policy", 
-    DeterministicPolicyNetwork,
-    {"hidden_dim": 64, "action_dim": 1}
-)
-
-NetworkArchitectureRegistry.register(
-    "value_function",
-    ValueNetwork,
-    {"hidden_dim": 64}
-)
+def create_deterministic_rl_policy(config: OptimalExecutionConfig = default_config,
+                                  hidden_dim: int = 64, 
+                                  key: random.PRNGKey = random.PRNGKey(42)) -> RLPolicy:
+    """Create RL policy with deterministic actions.""" 
+    network = SimpleDeterministicPolicy(hidden_dim=hidden_dim)
+    
+    # Initialize parameters
+    dummy_input = jnp.ones(6)  # State dim (5) + time (1)
+    params = network.init(key, dummy_input)
+    
+    return RLPolicy(network, params, config, "deterministic")
