@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from jax import random, grad, vmap
 import flax.linen as nn
 import optax
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any
 from dataclasses import dataclass
 
 from .config import OptimalExecutionConfig, default_config

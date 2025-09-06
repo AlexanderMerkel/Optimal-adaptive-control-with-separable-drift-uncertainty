@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__sequential-thinking__sequentialthinking",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:www.sciencedirect.com)",
+      "WebFetch(domain:onlinelibrary.wiley.com)",
+      "Bash(pip install:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(mv:*)",
+      "Bash(find:*)",
+      "Bash(python:*)",
+      "mcp__jupyter__execute_cell_simple_timeout",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(ruff check:*)",
+      "mcp__jupyter__execute_cell_with_progress",
+      "mcp__jupyter__get_notebook_info",
+      "Bash(jupyter notebook --version)",
+      "mcp__jupyter__read_all_cells",
+      "Bash(ls:*)",
+      "Bash(rm:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "mcp__jupyter__append_execute_code_cell",
+      "mcp__jupyter__overwrite_cell_source",
+      "mcp__jupyter__insert_markdown_cell",
+      "mcp__jupyter__append_markdown_cell",
+      "mcp__gemini__ask-gemini",
+      "Bash(pdflatex:*)",
+      "Bash(grep:*)",
+      "Bash(papermill:*)"
+    ],
+    "deny": []
+  }
+}

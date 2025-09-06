@@ -12,8 +12,8 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 import optax
-from jax import random, vmap
-from typing import Dict, List, Tuple, Any
+from jax import random
+from typing import Dict, List, Any
 from dataclasses import dataclass
 import numpy as np
 
@@ -357,7 +357,7 @@ def train_reinforce_policy(problem_config: OptimalExecutionConfig = default_conf
     
     # Print final statistics
     final_rewards = history["rewards"][-100:]  # Last 100 episodes
-    print(f"\nFinal Performance (last 100 episodes):")
+    print("\nFinal Performance (last 100 episodes):")
     print(f"  Mean Reward: {np.mean(final_rewards):.3f} ± {np.std(final_rewards):.3f}")
     print(f"  Best Reward: {np.max(history['rewards']):.3f}")
     

@@ -112,7 +112,8 @@ Foundational paper for Deep Q-Networks, providing algorithmic basis for RL appro
 
 **What's well-documented**: Classical foundations (Almgren-Chriss, Obizhaeva-Wang), established regime-switching models, NBER/journal publications have complete citations.
 
-**Coverage Gaps**: 
+**Coverage Gaps**:
+
 - Detailed RL literature for execution (active area but access limited)
 - Very recent algorithmic trading research (often proprietary)
 - Non-English publications

@@ -1,6 +1,7 @@
 # Project Documentation
 
 ## Overview
+
 This project focuses on **finite-horizon optimal adaptive control** numerics, implementing various algorithms for solving partially observable stochastic control problems. The main algorithms include:
 
 - **PDE/DGM**: Deep Galerkin Method for solving HJB equations
@@ -22,6 +23,7 @@ This project focuses on **finite-horizon optimal adaptive control** numerics, im
 ## Control Problem Formulation
 
 ### System Dynamics
+
 Let $T > 0$ be the finite time horizon with discrete time steps $t_k = k\Delta t$, $k=0,...,N$.
 For simplicity of notation, we denote the innovations process $I^{u}_t = \rd W_t$.
 The augmented state process $(S_t, X_t, p_t, A^l_t, A^h_t)$ follows:
@@ -37,6 +39,7 @@ The augmented state process $(S_t, X_t, p_t, A^l_t, A^h_t)$ follows:
 ```
 
 where:
+
 - $S_t$: Observable state process
 - $X_t$: Inventory process
 - $p_t$: Belief state ($\mathbb{P}(\lambda = \lambda_l|\mathcal{F}_t)$)
@@ -44,6 +47,7 @@ where:
 - $W_t$: Brownian motion, $I_t$: Innovation process
 
 ### Cost Functional
+
 Maximize the profit from liquidation expected cost over finite horizon $[0,T]$:
 
 ```math
@@ -51,10 +55,10 @@ J(u) = \mathbb{E}\left[\int_0^T \left((S_t - \rho u_t)u_t - c X_t^2\right)\mathr
 ```
 
 with parameters:
+
 - $\rho > 0$: Control penalty
 - $c > 0$: Running cost coefficient
 - $C > 0$: Terminal cost coefficient
-
 
 ## Numerical Implementation
 
@@ -68,6 +72,7 @@ The augmented state-space formulation enables Markovian control:
 ```
 
 ### Key Parameters
+
 | Parameter              | Description              | Value                                                      |
 | ---------------------- | ------------------------ | ---------------------------------------------------------- |
 | $T$                    | Time horizon             | 10                                                         |
@@ -83,6 +88,7 @@ The augmented state-space formulation enables Markovian control:
 ## Algorithm Implementation
 
 ### REINFORCE Components
+
 ```python
 # Gaussian policy network
 class PolicyNetwork(nn.Module):

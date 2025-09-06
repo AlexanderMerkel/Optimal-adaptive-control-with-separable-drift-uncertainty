@@ -13,7 +13,7 @@ State: [Y, X, p, alpha_l, alpha_h] where:
 import jax
 import jax.numpy as jnp
 from jax import random
-from typing import Tuple, Optional, NamedTuple
+from typing import Optional, NamedTuple
 
 from .config import OptimalExecutionConfig, default_config
 

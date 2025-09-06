@@ -10,18 +10,17 @@ Comprehensive comparison framework implementing the exact controls from
 Includes convergence analysis, learning curves, and statistical comparisons.
 """
 
-import jax
 import jax.numpy as jnp
 from jax import random
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 from dataclasses import dataclass
 
 from .environment import OptimalExecutionEnv
-from .policies import Policy, CertaintyEquivalentPolicy, NaivePolicy, OraclePolicy
+from .policies import Policy, CertaintyEquivalentPolicy, OraclePolicy
 from .config import OptimalExecutionConfig, default_config
-from .reinforce_agent import train_reinforce_policy, REINFORCEConfig
+from .reinforce_agent import REINFORCEConfig
 
 
 @dataclass

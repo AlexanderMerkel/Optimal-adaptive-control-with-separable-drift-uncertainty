@@ -12,7 +12,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 from abc import ABC, abstractmethod
-from typing import Callable, Optional, Dict, Any
+from typing import Optional, Dict, Any
 import flax.linen as nn
 
 from .config import OptimalExecutionConfig, default_config

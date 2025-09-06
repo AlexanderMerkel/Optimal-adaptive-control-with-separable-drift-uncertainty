@@ -1,6 +1,7 @@
 # Project Documentation
 
 ## Overview
+
 This project focuses on optimal adaptive control numerics, implementing various algorithms for solving control problems. The main algorithms include:
 
 - **PDE/DGM**: Deep Galerkin Method for solving partial differential equations.
