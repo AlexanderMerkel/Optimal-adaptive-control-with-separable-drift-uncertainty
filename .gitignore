@@ -1,0 +1,14 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local virtualenvs
+.venv/
+venv/
+
+# Runtime artifacts
+outputs/
+*.log
+
+# Notebook checkpoints
+.ipynb_checkpoints/

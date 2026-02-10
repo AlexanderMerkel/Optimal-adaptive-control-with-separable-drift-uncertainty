@@ -1,0 +1,16 @@
+batch_size: 128
+max_epochs: 200
+tol: 1.0e-4
+lr: 1.0e-3
+hidden_v: 512
+hidden_ctrl: 512
+layers_v: 2
+layers_ctrl: 2
+dl: 1.0e-3
+include_lambda_endpoint: false
+seed: 7
+deterministic: false
+print_interval: 20
+prefer_cuda: false
+output_dir: outputs
+model_prefix: adaptive_local
